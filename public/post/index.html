@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en-us">
+
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1">
+<title> Posts &middot; Frodux </title>
+
+
+<link rel="stylesheet" href="https://tebriel.github.io/frodux/css/slim.css">
+<link rel="stylesheet" href="https://tebriel.github.io/frodux/css/highlight.min.css">
+<link href='https://fonts.googleapis.com/css?family=Source+Sans+Pro:400,700|Source+Code+Pro' rel='stylesheet' type='text/css'>
+
+<link rel="apple-touch-icon-precomposed" sizes="144x144" href="/apple-touch-icon-144-precomposed.png">
+<link rel="shortcut icon" href="/favicon.ico">
+
+
+<link href="https://tebriel.github.io/frodux/post/index.xml" rel="alternate" type="application/rss+xml" title="Frodux" />
+
+</head>
+
+<body>
+  <div class="container">
+    <div class="header">
+  <h1 class="site-title"><a href="https://tebriel.github.io/frodux/">Frodux</a></h1>
+  <p class="site-tagline"></p>
+  <div class="nav">
+    <a class="nav-btn" href="#">
+      <span class="ci ci-burger"></span>
+    </a>
+    <ul class="nav-list">
+       
+	  <li class="spacer">&ac;</li>
+
+      <li><a href="https://github.com/tebriel">Github</a></li> 
+      <li><a href="https://twitter.com/tebriel">Twitter</a></li> 
+    </ul>
+  </div>
+</div>
+    <div class="content">
+      <div class="posts">
+         
+        <div class="post">
+          <h2 class="post-title"><a href="https://tebriel.github.io/frodux/post/logstash_grok_speeds/">Logstash Grok Speeds</a></h2>
+          <span class="post-date">Dec 21, 2015</span>
+		  
+		  
+		  	<div class="summary">
+				Logstash and its Grok filter are excellent and I love them, but it was going so slow that the data was useless by the time I had finally ingested it to review it, here&rsquo;s what was wrong and how I fixed it. Issue The Grok filter in Logstash was only able to handle between 10 and 30 log lines per second based on my many REGEX lines. This is slower than the speed at which we generate log lines (~50/sec).
+				<a class="read-more" href="/frodux/post/logstash_grok_speeds/">&hellip;</a>
+			</div>
+		  
+        </div>
+        
+        <div class="post">
+          <h2 class="post-title"><a href="https://tebriel.github.io/frodux/post/logstash_config_file_organization/">Logstash Config File Organization</a></h2>
+          <span class="post-date">Mar 10, 2015</span>
+		  
+		  
+		  	<div class="summary">
+				I&rsquo;m currently at Elastic{ON} 15, which has been an amazing experience so far. Someone had the brilliant idea to set up an Apple-Style Genius bar where you just walk up and talk to someone from Elastic support. Sometimes you get contributors to the project your asking about too, it&rsquo;s great. My Logstash config currently clocks in around 300 lines for the wide variety of things I have to parse out of syslog, I mentioned to Jordan Sissel that the config file was almost completely unmanageable and was killing me, and he gave me the secrets I&rsquo;m about to reveal to you.
+				<a class="read-more" href="/frodux/post/logstash_config_file_organization/">&hellip;</a>
+			</div>
+		  
+        </div>
+        
+        <div class="post">
+          <h2 class="post-title"><a href="https://tebriel.github.io/frodux/post/vpn_tunnels_osx/">VPN, but with Tunnels in OS X</a></h2>
+          <span class="post-date">Feb 26, 2015</span>
+		  
+		  
+		  	<div class="summary">
+				Background I work at a mid-aged startup, PindropSecurity, and all of our internal resources such as Github Enterprise, Jira, Jenkins, etc (I could keep going, but there&rsquo;s no point) are things I have become accustomed to having, and don&rsquo;t really want to live without when I&rsquo;m working from home, for example: when Atlanta decides to shut down over the potential of snow. Problem Engineering and our list of internal resources is growing faster than our OPS team would like and because we deal with some sensitive data, we&rsquo;re still working out all the details of our VPN solution.
+				<a class="read-more" href="/frodux/post/vpn_tunnels_osx/">&hellip;</a>
+			</div>
+		  
+        </div>
+        
+        <div class="post">
+          <h2 class="post-title"><a href="https://tebriel.github.io/frodux/post/multiple_databases_with_rails_testing/">Multiple Databases with Rails Testing</a></h2>
+          <span class="post-date">Oct 30, 2014</span>
+		  
+		  
+		  	<div class="summary">
+				Issue Unit testing a rails app with multiple databases configured per-model with establish_connection is unable to use advanced query features on the model objects such as joins. Background At work, we have two databases. One is for our API (a Tornado backend), and the other is for our UI (a Rails frontend). Sadly, instead of separating our concerns when these two apps were built, it was decided that they should be able to just talk directly to each database.
+				<a class="read-more" href="/frodux/post/multiple_databases_with_rails_testing/">&hellip;</a>
+			</div>
+		  
+        </div>
+        
+      </div>
+      <div class="pagination">
+   
+</div>
+    </div>
+    <div class="footer">
+  
+  <p>Powered by <a href="http://gohugo.io">Hugo</a>. This theme—Slim—is open sourced on <a href="https://github.com/zhe/hugo-theme-slim">Github</a>.</p>
+  
+</div>
+
+  </div>
+  <script src="https://tebriel.github.io/frodux/js/slim.js"></script>
+  
+
+</body>
+
+</html>

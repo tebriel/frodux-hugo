@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1">
+<title> VPN, but with Tunnels in OS X &middot; Frodux </title>
+
+
+<link rel="stylesheet" href="https://tebriel.github.io/frodux/css/slim.css">
+<link rel="stylesheet" href="https://tebriel.github.io/frodux/css/highlight.min.css">
+<link href='https://fonts.googleapis.com/css?family=Source+Sans+Pro:400,700|Source+Code+Pro' rel='stylesheet' type='text/css'>
+
+<link rel="apple-touch-icon-precomposed" sizes="144x144" href="/apple-touch-icon-144-precomposed.png">
+<link rel="shortcut icon" href="/favicon.ico">
+
+
+<link href="" rel="alternate" type="application/rss+xml" title="Frodux" />
+
+</head>
+
+<body>
+  <div class="container">
+    <div class="header">
+  <h1 class="site-title"><a href="https://tebriel.github.io/frodux/">Frodux</a></h1>
+  <p class="site-tagline"></p>
+  <div class="nav">
+    <a class="nav-btn" href="#">
+      <span class="ci ci-burger"></span>
+    </a>
+    <ul class="nav-list">
+       
+	  <li class="spacer">&ac;</li>
+
+      <li><a href="https://github.com/tebriel">Github</a></li> 
+      <li><a href="https://twitter.com/tebriel">Twitter</a></li> 
+    </ul>
+  </div>
+</div>
+    <div class="content">
+      <div class="posts">
+        <div class="post">
+          <h2 class="post-title"><a href="https://tebriel.github.io/frodux/post/vpn_tunnels_osx/">VPN, but with Tunnels in OS X</a></h2>
+          <span class="post-date">Feb 26, 2015 </span>
+          <div class="post-content">
+            
+
+<h2 id="background">Background</h2>
+
+<p>I work at a mid-aged startup, <a href="http://pindropsecurity.com">PindropSecurity</a>, and all of our internal resources such as <a href="https://enterprise.github.com">Github Enterprise</a>, <a href="https://www.atlassian.com/software/jira">Jira</a>, <a href="http://jenkins-ci.org">Jenkins</a>, etc (I could keep going, but there&rsquo;s no point) are things I have become accustomed to having, and don&rsquo;t really want to live without when I&rsquo;m working from home, for example: when Atlanta decides to shut down over the potential of snow.</p>
+
+<h2 id="problem">Problem</h2>
+
+<p>Engineering and our list of internal resources is growing faster than our OPS team would like and because we deal with some sensitive data, we&rsquo;re still working out all the details of our VPN solution. So while we wait on that to arrive, how do I get access to everything I need?</p>
+
+<h2 id="first-solution-attempt">First Solution Attempt</h2>
+
+<p>Well, normally you do something like use <a href="https://github.com/apenwarr/sshuttle">sshuttle</a> but if you&rsquo;re like me, and running Yosemite, that&rsquo;s no longer an option.</p>
+
+<p>Okay, sure, let&rsquo;s create a reverse tunnel for every site I want to access.</p>
+
+<pre><code>ssh -f -L 8080:jira.internal:80 remote-host -N
+ssh -f -L 8081:github.internal:80 remote-host -N
+ssh -f -L 8082:jenkins.internal:80 remote-host -N
+</code></pre>
+
+<p>Okay, now I just need to access those in my browser, let&rsquo;s navigate to <a href="http://127.0.0.1:8080">http://127.0.0.1:8080</a>, then <a href="http://127.0.0.1:8081">http://127.0.0.1:8081</a>, then <a href="http://127.0.0.1:8082">http://127.0.0.1:8082</a>. Wait, which one is which?</p>
+
+<p>At this point, I actually took the time to spin up an <a href="http://nginx.org">nginx</a> server, edited my hosts file for each of these, then had nginx proxy them to the proper ports. All of this was getting very, very complicated and plus I was running nginx locally to handle my web traffic.</p>
+
+<h2 id="there-s-a-better-way">There&rsquo;s a better way!</h2>
+
+<p>SOCKS Proxy is the way to go, just create a tunnel on an arbitrary port, say 5000 like so the following, and you&rsquo;re already halfway there.</p>
+
+<pre><code>ssh remote-host -N -D 5000
+</code></pre>
+
+<p>Now, open up System Preferences | Network | Advanced | Proxies and check the SOCKS Proxy box, set the host : port to <code>127.0.0.1 : 5000</code>.</p>
+
+<p>A lot of our internal resources either end in .net or .local, so to make sure those always flow through the tunnel, I set these as my only hosts that bypass the proxy: <code>169.254/16, *.com, *.org</code>. Your network setup may differ from mine. I specifically excluded .com so that I wouldn&rsquo;t stream Spotify through the work connection, and .org just seemed like a good idea.</p>
+
+<p>Save and apply those settings, and now you can navigate to those internal resources like you do when you&rsquo;re wired up at work.</p>
+
+<h2 id="but-wait-there-s-more">But wait, there&rsquo;s more.</h2>
+
+<p>Okay, that&rsquo;s cool and all, but I want to push to our internal Enterprise Github, how do I do that, Mr. Smartypants?</p>
+
+<p>Well, <a href="https://twitter.com/brimston3">@brimston3</a> our local OPSMaster shared this super awesome ProxyCommand for your .ssh config (<code>~/.ssh/config</code>) to allow you to work internal and remote with the same configuration.</p>
+
+<pre><code>Host github.internal
+    HostName github.internal
+    IdentityFile /Users/cmoultrie/.ssh/id_rsa
+    ProxyCommand bash -c 'nc -w 15 %h %p; ssh remote-host -W %h:%p'
+    User git
+</code></pre>
+
+<p>Assuming that you cloned from <code>github.internal</code>, this allows you use netcat to try to hit the server locally first, then tunnel into your network if that fails. It works like a charm.</p>
+
+<h2 id="one-more-thing">One More Thing</h2>
+
+<p>We just spun up <a href="https://www.hipchat.com/server">HipChat Server</a> Internally (we&rsquo;re soon going to have every service available from every company internally installed, maybe we&rsquo;ll get our own stackoverflow preopulated with questions/answers too) and I couldn&rsquo;t find any documentation on what ports it needed to use to get to the mothership and it wasn&rsquo;t using the system&rsquo;s SOCKS proxy settings.</p>
+
+<p>So, I spun up <a href="https://www.wireshark.org">Wireshark</a> and just watched it trying to connect, inspected the port (5222) and then set up a second tunnel like so:</p>
+
+<p><code>ssh -L 5222:hipchat.internal:5222 remote-host -N</code></p>
+
+<p>I edited the connection settings in the hipchat app to talk to <code>127.0.0.1</code> and now have remote chat as well!</p>
+
+<h3 id="done">Done</h3>
+
+<p>So there you have it, simple way to get into your work network if you don&rsquo;t have a VPN solution, so that you can continue to be productive, or just send your co-workers <a href="http://41.media.tumblr.com/tumblr_m0jfy81TTT1qb6t6wo1_500.jpg">cat memes</a>, whatever works for you.</p>
+
+          </div>
+        </div>
+        <div class="pagination">
+          <a class="btn previous " href="https://tebriel.github.io/frodux/post/logstash_config_file_organization/"> Prev</a>  
+          <a class="btn next " href="https://tebriel.github.io/frodux/post/multiple_databases_with_rails_testing/"> Next</a> 
+        </div>
+      </div>
+    </div>
+    
+    <div class="footer">
+  
+  <p>Powered by <a href="http://gohugo.io">Hugo</a>. This theme—Slim—is open sourced on <a href="https://github.com/zhe/hugo-theme-slim">Github</a>.</p>
+  
+</div>
+
+  </div>
+  <script src="https://tebriel.github.io/frodux/js/slim.js"></script>
+  <script src="https://tebriel.github.io/frodux/js/highlight.min.js"></script>
+  <script>
+    hljs.initHighlightingOnLoad();
+  </script>
+  
+</body>
+
+</html>

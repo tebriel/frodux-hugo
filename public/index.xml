@@ -1,0 +1,384 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes" ?>
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">
+  <channel>
+    <title>Frodux</title>
+    <link>https://tebriel.github.io/frodux/</link>
+    <description>Recent content on Frodux</description>
+    <generator>Hugo -- gohugo.io</generator>
+    <language>en-us</language>
+    <lastBuildDate>Mon, 21 Dec 2015 15:54:00 -0400</lastBuildDate>
+    <atom:link href="https://tebriel.github.io/frodux/index.xml" rel="self" type="application/rss+xml" />
+    
+    <item>
+      <title>Logstash Grok Speeds</title>
+      <link>https://tebriel.github.io/frodux/post/logstash_grok_speeds/</link>
+      <pubDate>Mon, 21 Dec 2015 15:54:00 -0400</pubDate>
+      
+      <guid>https://tebriel.github.io/frodux/post/logstash_grok_speeds/</guid>
+      <description>
+
+&lt;p&gt;Logstash and its Grok filter are excellent and I love them, but it was going so slow that the data was useless by the time I had finally ingested it to review it, here&amp;rsquo;s what was wrong and how I fixed it.&lt;/p&gt;
+
+&lt;h3 id=&#34;issue&#34;&gt;Issue&lt;/h3&gt;
+
+&lt;p&gt;The Grok filter in &lt;a href=&#34;http://www.logstash.net&#34;&gt;Logstash&lt;/a&gt; was only able to handle between 10 and 30 log lines per second based on my many REGEX lines. This is slower than the speed at which we generate log lines (~50/sec).&lt;/p&gt;
+
+&lt;h3 id=&#34;background&#34;&gt;Background&lt;/h3&gt;
+
+&lt;p&gt;At &lt;a href=&#34;http://www.pindropsecurity.com&#34;&gt;Pindrop&lt;/a&gt; we send all log messages to Syslog for aggregation. This means that all logs for all purposes are in the same file. I set up an &lt;a href=&#34;http://www.elasticsearch.org/overview/elkdownloads/&#34;&gt;ELK&lt;/a&gt; Stack on my laptop to:&lt;/p&gt;
+
+&lt;ul&gt;
+&lt;li&gt;Get deeper insight into what kinds of response times our customers should be expecting&lt;/li&gt;
+&lt;li&gt;Determine where we were spending the most time in generating our API response&lt;/li&gt;
+&lt;li&gt;Look for anomalies, similarities, and other interesting points in what customers are querying for.&lt;/li&gt;
+&lt;/ul&gt;
+
+&lt;p&gt;The grok filter config was immediately very complicated, due to the widely varying nature of our log lines, mixture of appliations sending log lines, and the detail I needed to pluck from these lines. For example, some of our log lines have a Python array pretty printed, whereas others did a JSON serialization of the data. Extracting phone numbers and usernames from this data is a dizzying set of REGEX queries.&lt;/p&gt;
+
+&lt;p&gt;Thankfully to develop these grok lines, &lt;a href=&#34;https://grokdebug.herokuapp.com&#34;&gt;Grok Debugger&lt;/a&gt; exists, which will save your sanity.&lt;/p&gt;
+
+&lt;p&gt;Here&amp;rsquo;s an example log line:&lt;/p&gt;
+
+&lt;p&gt;&lt;code&gt;Dec 18 07:49:05 box-004 MainProcess[36381]: pindrop.profiler INFO [req bdcecd58a4ab7c2e@box-004] fetch_data - finished at 1418888945.046632, taking 0.006296 seconds (0.00 cpu)&lt;/code&gt;&lt;/p&gt;
+
+&lt;p&gt;This is one of the easier examples, the data I want from this line is:&lt;/p&gt;
+
+&lt;ul&gt;
+&lt;li&gt;Timestamp (&lt;code&gt;Dec 18 07:49:05&lt;/code&gt;)&lt;/li&gt;
+&lt;li&gt;Who logged it? (&lt;code&gt;pindrop.profiler&lt;/code&gt;)&lt;/li&gt;
+&lt;li&gt;Function (&lt;code&gt;fetch_data&lt;/code&gt;)&lt;/li&gt;
+&lt;li&gt;How long did it take? (&lt;code&gt;0.006296&lt;/code&gt;)&lt;/li&gt;
+&lt;/ul&gt;
+
+&lt;p&gt;So I have a grok configuration that looks like this:&lt;/p&gt;
+
+&lt;pre&gt;&lt;code class=&#34;language-language-ruby&#34;&gt;filter {
+    grok {
+        match =&amp;gt; [&amp;quot;message&amp;quot;, &amp;quot;%{pd_SYSLOG_NORMAL} %{pd_REQUEST} %{DATA:proc_detail} - %{DATA}, taking %{NUMBER:duration_seconds:float} seconds&amp;quot;]
+        patterns_dir =&amp;gt; &amp;quot;patterns/&amp;quot;
+    }
+}
+&lt;/code&gt;&lt;/pre&gt;
+
+&lt;p&gt;I also have all these reusable patterns that I wrote/modified from the Logstash base.&lt;/p&gt;
+
+&lt;pre&gt;&lt;code&gt;pd_UNIQUE_ID [a-f0-9]{12,16}
+
+pd_SOMECLASS (?:[a-zA-Z0-9-_]+[.]?)+[A-Za-z0-9$_]+
+
+pd_SYSLOG_BASE %{SYSLOGTIMESTAMP:timestamp} %{HOST} %{SYSLOGPROG}:
+pd_SYSLOG_NORMAL %{pd_SYSLOG_BASE} %{pd_SOMECLASS} (INFO|ERROR|WARN)
+pd_REQUEST \[req %{pd_UNIQUE_ID:unique_id}@%{HOST}\]
+&lt;/code&gt;&lt;/pre&gt;
+
+&lt;p&gt;This is a pretty specific pattern, I realize. But with our many different types of loglines, it&amp;rsquo;s hard to be more generic, capture all the data I need, and be able to come in and edit them again later and maintain my sanity (which is already wearing thin).&lt;/p&gt;
+
+&lt;h3 id=&#34;debugging-the-problem&#34;&gt;Debugging the Problem&lt;/h3&gt;
+
+&lt;p&gt;I knew that since I had about 15 different styles of patterns all in sequence from most-specific to least (with &lt;code&gt;break_on_match =&amp;gt; true&lt;/code&gt;) that testing each of these in sequence was going to be the biggest time-sink. I optimized and limited these patterns as much as I could, but with little success.&lt;/p&gt;
+
+&lt;p&gt;I dove into Logstash&amp;rsquo;s &lt;a href=&#34;https://github.com/elasticsearch/logstash/blob/1.4/lib/logstash/filters/grok.rb&#34;&gt;Grok Filter&lt;/a&gt; and started timing the regex match, like so:&lt;/p&gt;
+
+&lt;pre&gt;&lt;code class=&#34;language-language-ruby&#34;&gt;now = Time.now
+grok, match = grok.match(input.to_s) # Original Line
+total = Time.now - now
+if total &amp;gt; @average_time
+    @logger.warn(&amp;quot;Took #{total}s which is #{total - @average_time} longer than average of #{@average_time}&amp;quot;, :event =&amp;gt; input)
+    @average_time = (@average_time + total) / 2
+end
+&lt;/code&gt;&lt;/pre&gt;
+
+&lt;p&gt;This gave me some good insight&lt;/p&gt;
+
+&lt;ol&gt;
+&lt;li&gt;What the average time spent handling these patterns was.&lt;/li&gt;
+&lt;li&gt;If our patterns were taking progressively longer over time.&lt;/li&gt;
+&lt;li&gt;Which input lines were taking longer than the average to process.&lt;/li&gt;
+&lt;/ol&gt;
+
+&lt;p&gt;My longest offenders were taking 1.5s, where the quick ones were less than 0.01s.&lt;/p&gt;
+
+&lt;h3 id=&#34;solution&#34;&gt;Solution&lt;/h3&gt;
+
+&lt;p&gt;In the end, I knew that simplifying the many patterns we would inevitably test these log lines against was the only thing that was going to make a difference. As I was scouring the Logstash Docs, I noticed that there was this section on &lt;a href=&#34;http://logstash.net/docs/1.4.2/filters/grok#overwrite&#34;&gt;overwriting&lt;/a&gt; a field with a match from a grok line.&lt;/p&gt;
+
+&lt;p&gt;This gave me a &amp;lsquo;eureka&amp;rsquo; moment in which I realized I should match the Syslog base of the line once and only once, and then in a separate grok filter, match my speciality parts. Now my grok line is just:&lt;/p&gt;
+
+&lt;pre&gt;&lt;code class=&#34;language-language-ruby&#34;&gt;match =&amp;gt; [&amp;quot;message&amp;quot;, &amp;quot;%{pd_REQUEST} %{DATA:proc_detail} - %{DATA}, taking %{NUMBER:duration_seconds:float} seconds&amp;quot;]
+&lt;/code&gt;&lt;/pre&gt;
+
+&lt;p&gt;&lt;code&gt;pd_SYSLOG_NORMAL&lt;/code&gt; actually expands into 5 different patterns. The result of removing this is that I now only have 5 patterns left in the match line (&lt;code&gt;pd_REQUEST&lt;/code&gt; is 2). A 50% decrease in patterns for just this one line, but more than that, in the worst case a line was running on those initial 5 patterns 15x. So this means I take 70 matching patterns out of the mix (assuming that 1 of those has to match).&lt;/p&gt;
+
+&lt;p&gt;The speed up was dramatic, I went from matching 10-30 lines/s to 500 lines/s. So, if you&amp;rsquo;re trying to match on the same thing over and over again, pull it out into a separate grok filter, it will save you time and sanity.&lt;/p&gt;
+</description>
+    </item>
+    
+    <item>
+      <title>Logstash Config File Organization</title>
+      <link>https://tebriel.github.io/frodux/post/logstash_config_file_organization/</link>
+      <pubDate>Tue, 10 Mar 2015 20:33:00 -0400</pubDate>
+      
+      <guid>https://tebriel.github.io/frodux/post/logstash_config_file_organization/</guid>
+      <description>
+
+&lt;p&gt;I&amp;rsquo;m currently at &lt;a href=&#34;http://www.elasticon.com&#34;&gt;Elastic{ON} 15&lt;/a&gt;, which has been an amazing experience so far. Someone had the brilliant idea to set up an Apple-Style Genius bar where you just walk up and talk to someone from &lt;a href=&#34;http://www.elastic.co&#34;&gt;Elastic&lt;/a&gt; support. Sometimes you get contributors to the project your asking about too, it&amp;rsquo;s great.&lt;/p&gt;
+
+&lt;p&gt;My &lt;a href=&#34;http://www.logstash.net&#34;&gt;Logstash&lt;/a&gt; config currently clocks in around 300 lines for the wide variety of things I have to parse out of syslog, I mentioned to &lt;a href=&#34;https://twitter.com/jordansissel&#34;&gt;Jordan Sissel&lt;/a&gt; that the config file was almost completely unmanageable and was killing me, and he gave me the secrets I&amp;rsquo;m about to reveal to you.&lt;/p&gt;
+
+&lt;h2 id=&#34;break-your-files-up&#34;&gt;Break your files up&lt;/h2&gt;
+
+&lt;p&gt;You can break up your logstash config into multiple files, and just tell logstash to match a glob for configuration. Logstash just sorts the files alphabetically and then concatenates them together.&lt;/p&gt;
+
+&lt;p&gt;With the knowledge in hand that they&amp;rsquo;ll just be sorted lexographically, I took my very long filter block in my config file and broke it up into 8 filter configs, like so: &lt;code&gt;0001-filter-syslog-base.conf&lt;/code&gt;. The next one is &lt;code&gt;0002&lt;/code&gt; and so on. If I ever have more than &lt;code&gt;9999&lt;/code&gt; filters it&amp;rsquo;s time to do something else. Really if I ever have more than 10, but just in case&amp;hellip;&lt;/p&gt;
+
+&lt;h2 id=&#34;order-only-matters-within-blocks&#34;&gt;Order only matters within blocks&lt;/h2&gt;
+
+&lt;p&gt;For this very contrived example, let&amp;rsquo;s say that my files get ordered in such a way that the config file has a filter then an output then a filter.&lt;/p&gt;
+
+&lt;ol&gt;
+&lt;li&gt;&lt;code&gt;0001-filter.conf&lt;/code&gt;&lt;/li&gt;
+&lt;li&gt;&lt;code&gt;0002-output.conf&lt;/code&gt;&lt;/li&gt;
+&lt;li&gt;&lt;code&gt;0003-filter.conf&lt;/code&gt;&lt;/li&gt;
+&lt;/ol&gt;
+
+&lt;p&gt;Doesn&amp;rsquo;t matter! &lt;code&gt;0001&lt;/code&gt; and &lt;code&gt;0003&lt;/code&gt; will be ordered correctly and the output will stay outside of those two in its own output block.&lt;/p&gt;
+
+&lt;p&gt;This means that as long as overall, your filters and outputs have the correct order, you can have them all in separate files each in separate blocks.&lt;/p&gt;
+
+&lt;p&gt;Each file will begin with &lt;code&gt;filter {&lt;/code&gt; or &lt;code&gt;input {&lt;/code&gt; or &lt;code&gt;output {&lt;/code&gt; so they could technically stand on their own, but will just be concatenated into one large config.&lt;/p&gt;
+
+&lt;h2 id=&#34;config-path-uses-dir-glob&#34;&gt;Config Path uses Dir.glob&lt;/h2&gt;
+
+&lt;p&gt;Oh this was the best revelation of all for me. Currently, when I&amp;rsquo;m testing things, I&amp;rsquo;ll disable syslog and elasticsearch input/output and enable stdin and stdout to test patterns. Now I can just have separate files for dev and prod input and output.&lt;/p&gt;
+
+&lt;p&gt;Here&amp;rsquo;s an example glob for launching this way:&lt;/p&gt;
+
+&lt;pre&gt;&lt;code&gt;bin/logstash agent -f &#39;config/logstash/conf.d/{dev,*filter*}.conf&#39;
+&lt;/code&gt;&lt;/pre&gt;
+
+&lt;p&gt;Here we&amp;rsquo;re matching all of my filters and using the dev configuration, replace with prod and now you&amp;rsquo;re pushing to ES.&lt;/p&gt;
+
+&lt;p&gt;For reference, here&amp;rsquo;s what my directory looks like with the config files.&lt;/p&gt;
+
+&lt;pre&gt;&lt;code&gt;cmoultrie@Sauron ~/G/logstash-1.5.0.rc2&amp;gt; ls -l
+0001-filter-syslog-base.conf
+0002-filter-million.conf
+0003-filter-prsapi.conf
+0004-filter-use-multirequest.conf
+0005-filter-add-query_complete.conf
+0006-filter-handle-json.conf
+0007-filter-set-tag.conf
+0008-filter-identify-and-geohash.conf
+dev.conf
+prod.conf
+
+&lt;/code&gt;&lt;/pre&gt;
+
+&lt;h2 id=&#34;summary&#34;&gt;Summary&lt;/h2&gt;
+
+&lt;p&gt;The real magic here is that if you have a complicated set of filters or inputs, you can just separate them into different files. The ability to, without changing the config file, run in a dev environment or production is great because I always get nervous editing the settings for those things and then pushing them back to production.&lt;/p&gt;
+
+&lt;p&gt;Break your files up, you&amp;rsquo;ll be super happy.&lt;/p&gt;
+</description>
+    </item>
+    
+    <item>
+      <title>VPN, but with Tunnels in OS X</title>
+      <link>https://tebriel.github.io/frodux/post/vpn_tunnels_osx/</link>
+      <pubDate>Thu, 26 Feb 2015 22:44:00 -0400</pubDate>
+      
+      <guid>https://tebriel.github.io/frodux/post/vpn_tunnels_osx/</guid>
+      <description>
+
+&lt;h2 id=&#34;background&#34;&gt;Background&lt;/h2&gt;
+
+&lt;p&gt;I work at a mid-aged startup, &lt;a href=&#34;http://pindropsecurity.com&#34;&gt;PindropSecurity&lt;/a&gt;, and all of our internal resources such as &lt;a href=&#34;https://enterprise.github.com&#34;&gt;Github Enterprise&lt;/a&gt;, &lt;a href=&#34;https://www.atlassian.com/software/jira&#34;&gt;Jira&lt;/a&gt;, &lt;a href=&#34;http://jenkins-ci.org&#34;&gt;Jenkins&lt;/a&gt;, etc (I could keep going, but there&amp;rsquo;s no point) are things I have become accustomed to having, and don&amp;rsquo;t really want to live without when I&amp;rsquo;m working from home, for example: when Atlanta decides to shut down over the potential of snow.&lt;/p&gt;
+
+&lt;h2 id=&#34;problem&#34;&gt;Problem&lt;/h2&gt;
+
+&lt;p&gt;Engineering and our list of internal resources is growing faster than our OPS team would like and because we deal with some sensitive data, we&amp;rsquo;re still working out all the details of our VPN solution. So while we wait on that to arrive, how do I get access to everything I need?&lt;/p&gt;
+
+&lt;h2 id=&#34;first-solution-attempt&#34;&gt;First Solution Attempt&lt;/h2&gt;
+
+&lt;p&gt;Well, normally you do something like use &lt;a href=&#34;https://github.com/apenwarr/sshuttle&#34;&gt;sshuttle&lt;/a&gt; but if you&amp;rsquo;re like me, and running Yosemite, that&amp;rsquo;s no longer an option.&lt;/p&gt;
+
+&lt;p&gt;Okay, sure, let&amp;rsquo;s create a reverse tunnel for every site I want to access.&lt;/p&gt;
+
+&lt;pre&gt;&lt;code&gt;ssh -f -L 8080:jira.internal:80 remote-host -N
+ssh -f -L 8081:github.internal:80 remote-host -N
+ssh -f -L 8082:jenkins.internal:80 remote-host -N
+&lt;/code&gt;&lt;/pre&gt;
+
+&lt;p&gt;Okay, now I just need to access those in my browser, let&amp;rsquo;s navigate to &lt;a href=&#34;http://127.0.0.1:8080&#34;&gt;http://127.0.0.1:8080&lt;/a&gt;, then &lt;a href=&#34;http://127.0.0.1:8081&#34;&gt;http://127.0.0.1:8081&lt;/a&gt;, then &lt;a href=&#34;http://127.0.0.1:8082&#34;&gt;http://127.0.0.1:8082&lt;/a&gt;. Wait, which one is which?&lt;/p&gt;
+
+&lt;p&gt;At this point, I actually took the time to spin up an &lt;a href=&#34;http://nginx.org&#34;&gt;nginx&lt;/a&gt; server, edited my hosts file for each of these, then had nginx proxy them to the proper ports. All of this was getting very, very complicated and plus I was running nginx locally to handle my web traffic.&lt;/p&gt;
+
+&lt;h2 id=&#34;there-s-a-better-way&#34;&gt;There&amp;rsquo;s a better way!&lt;/h2&gt;
+
+&lt;p&gt;SOCKS Proxy is the way to go, just create a tunnel on an arbitrary port, say 5000 like so the following, and you&amp;rsquo;re already halfway there.&lt;/p&gt;
+
+&lt;pre&gt;&lt;code&gt;ssh remote-host -N -D 5000
+&lt;/code&gt;&lt;/pre&gt;
+
+&lt;p&gt;Now, open up System Preferences | Network | Advanced | Proxies and check the SOCKS Proxy box, set the host : port to &lt;code&gt;127.0.0.1 : 5000&lt;/code&gt;.&lt;/p&gt;
+
+&lt;p&gt;A lot of our internal resources either end in .net or .local, so to make sure those always flow through the tunnel, I set these as my only hosts that bypass the proxy: &lt;code&gt;169.254/16, *.com, *.org&lt;/code&gt;. Your network setup may differ from mine. I specifically excluded .com so that I wouldn&amp;rsquo;t stream Spotify through the work connection, and .org just seemed like a good idea.&lt;/p&gt;
+
+&lt;p&gt;Save and apply those settings, and now you can navigate to those internal resources like you do when you&amp;rsquo;re wired up at work.&lt;/p&gt;
+
+&lt;h2 id=&#34;but-wait-there-s-more&#34;&gt;But wait, there&amp;rsquo;s more.&lt;/h2&gt;
+
+&lt;p&gt;Okay, that&amp;rsquo;s cool and all, but I want to push to our internal Enterprise Github, how do I do that, Mr. Smartypants?&lt;/p&gt;
+
+&lt;p&gt;Well, &lt;a href=&#34;https://twitter.com/brimston3&#34;&gt;@brimston3&lt;/a&gt; our local OPSMaster shared this super awesome ProxyCommand for your .ssh config (&lt;code&gt;~/.ssh/config&lt;/code&gt;) to allow you to work internal and remote with the same configuration.&lt;/p&gt;
+
+&lt;pre&gt;&lt;code&gt;Host github.internal
+    HostName github.internal
+    IdentityFile /Users/cmoultrie/.ssh/id_rsa
+    ProxyCommand bash -c &#39;nc -w 15 %h %p; ssh remote-host -W %h:%p&#39;
+    User git
+&lt;/code&gt;&lt;/pre&gt;
+
+&lt;p&gt;Assuming that you cloned from &lt;code&gt;github.internal&lt;/code&gt;, this allows you use netcat to try to hit the server locally first, then tunnel into your network if that fails. It works like a charm.&lt;/p&gt;
+
+&lt;h2 id=&#34;one-more-thing&#34;&gt;One More Thing&lt;/h2&gt;
+
+&lt;p&gt;We just spun up &lt;a href=&#34;https://www.hipchat.com/server&#34;&gt;HipChat Server&lt;/a&gt; Internally (we&amp;rsquo;re soon going to have every service available from every company internally installed, maybe we&amp;rsquo;ll get our own stackoverflow preopulated with questions/answers too) and I couldn&amp;rsquo;t find any documentation on what ports it needed to use to get to the mothership and it wasn&amp;rsquo;t using the system&amp;rsquo;s SOCKS proxy settings.&lt;/p&gt;
+
+&lt;p&gt;So, I spun up &lt;a href=&#34;https://www.wireshark.org&#34;&gt;Wireshark&lt;/a&gt; and just watched it trying to connect, inspected the port (5222) and then set up a second tunnel like so:&lt;/p&gt;
+
+&lt;p&gt;&lt;code&gt;ssh -L 5222:hipchat.internal:5222 remote-host -N&lt;/code&gt;&lt;/p&gt;
+
+&lt;p&gt;I edited the connection settings in the hipchat app to talk to &lt;code&gt;127.0.0.1&lt;/code&gt; and now have remote chat as well!&lt;/p&gt;
+
+&lt;h3 id=&#34;done&#34;&gt;Done&lt;/h3&gt;
+
+&lt;p&gt;So there you have it, simple way to get into your work network if you don&amp;rsquo;t have a VPN solution, so that you can continue to be productive, or just send your co-workers &lt;a href=&#34;http://41.media.tumblr.com/tumblr_m0jfy81TTT1qb6t6wo1_500.jpg&#34;&gt;cat memes&lt;/a&gt;, whatever works for you.&lt;/p&gt;
+</description>
+    </item>
+    
+    <item>
+      <title>Multiple Databases with Rails Testing</title>
+      <link>https://tebriel.github.io/frodux/post/multiple_databases_with_rails_testing/</link>
+      <pubDate>Thu, 30 Oct 2014 16:19:00 -0400</pubDate>
+      
+      <guid>https://tebriel.github.io/frodux/post/multiple_databases_with_rails_testing/</guid>
+      <description>
+
+&lt;h3 id=&#34;issue&#34;&gt;Issue&lt;/h3&gt;
+
+&lt;p&gt;Unit testing a rails app with multiple databases configured per-model with &lt;code&gt;establish_connection&lt;/code&gt; is unable to use advanced query features on the model objects such as &lt;code&gt;joins&lt;/code&gt;.&lt;/p&gt;
+
+&lt;h3 id=&#34;background&#34;&gt;Background&lt;/h3&gt;
+
+&lt;p&gt;At work, we have two databases. One is for our API (a &lt;a href=&#34;http://www.tornadoweb.org/en/stable/&#34;&gt;Tornado&lt;/a&gt; backend), and the other is for our UI (a &lt;a href=&#34;http://rubyonrails.org&#34;&gt;Rails&lt;/a&gt; frontend). Sadly, instead of separating our concerns when these two apps were built, it was decided that they should be able to just talk directly to each database. In an ideal world we&amp;rsquo;d have the Tornado API give us any details we want about its database, and endpoints in Rails to do the same for the API.&lt;/p&gt;
+
+&lt;p&gt;In our rails models which correspond to the Tornado&amp;rsquo;s database, we have the following:&lt;/p&gt;
+
+&lt;pre&gt;&lt;code class=&#34;language-language-ruby&#34;&gt;class Phone &amp;lt; ActiveRecord::Base
+  establish_connection &amp;quot;data_#{Rails.env}&amp;quot;
+  # snip
+end
+&lt;/code&gt;&lt;/pre&gt;
+
+&lt;p&gt;What this does is tell Arel that to connect to a different database for this model, appending the current working environment to the end of the database name. Not ideal, but it works (though yields a pretty crazy &lt;code&gt;database.yml&lt;/code&gt;).&lt;/p&gt;
+
+&lt;p&gt;Within the last two weeks, I&amp;rsquo;ve gotten Rails Tests up and running with some basic fixtures and about 10 tests (mostly testing that we can log in and fetch a specific page). Today I started working on testing some code I was about to change, first I decided that I should test the current functionality before I broke/refactored it.&lt;/p&gt;
+
+&lt;p&gt;I needed to, on-the-fly, create and query &lt;code&gt;Phone&lt;/code&gt; models and correlate them with a &lt;code&gt;Phonecluster&lt;/code&gt; model, so I did the following:&lt;/p&gt;
+
+&lt;pre&gt;&lt;code class=&#34;language-language-ruby&#34;&gt;require &#39;test_helper&#39;
+
+class SearchesControllerTest &amp;lt; ActionController::TestCase
+  def setup
+    @bad_phone_status = Phone.new({
+      &#39;cid&#39; =&amp;gt; &#39;1234567890&#39;,
+      &#39;status&#39; =&amp;gt; &#39;INVALID&#39;
+    }).save()
+  end
+  test &amp;quot;Should create a phone&amp;quot; do
+    assert @bad_phone_status
+  end
+end
+&lt;/code&gt;&lt;/pre&gt;
+
+&lt;p&gt;Everything was hunky-dory. Looks like we&amp;rsquo;re ready to go. Let&amp;rsquo;s get more complicated.&lt;/p&gt;
+
+&lt;p&gt;&lt;code&gt;Phone&lt;/code&gt; has one &lt;code&gt;Phonecluster&lt;/code&gt; and their fk/pk relationship is on &lt;code&gt;cid&lt;/code&gt;, so let&amp;rsquo;s create two models, and try to join them together.&lt;/p&gt;
+
+&lt;pre&gt;&lt;code class=&#34;language-language-ruby&#34;&gt;require &#39;test_helper&#39;
+
+class SearchesControllerTest &amp;lt; ActionController::TestCase
+  def setup
+    @number = &#39;1234567890&#39;
+    Phone.new({
+      &#39;cid&#39; =&amp;gt; @number,
+      &#39;status&#39; =&amp;gt; &#39;INVALID&#39;
+    }).save()
+    Phonecluster.new({
+      &#39;cid&#39; =&amp;gt; @number,
+      &#39;cluster_id&#39; =&amp;gt; 1
+    }).save()
+  end
+  
+  test &amp;quot;Should create a phone[cluster] relationship&amp;quot; do
+    assert_equal 1, Phone.joins(:phonecluster).length
+  end
+end
+&lt;/code&gt;&lt;/pre&gt;
+
+&lt;p&gt;&lt;strong&gt;Fail!&lt;/strong&gt; If you enter into the step debugger here, and query &lt;code&gt;Phone.find_by_cid(@number)&lt;/code&gt; or &lt;code&gt;Phonecluster.find_by_cid(@number)&lt;/code&gt; you&amp;rsquo;ll get back a model for each, what&amp;rsquo;s going on here?&lt;/p&gt;
+
+&lt;h3 id=&#34;debugging-the-issue&#34;&gt;Debugging The Issue&lt;/h3&gt;
+
+&lt;ol&gt;
+&lt;li&gt;I stepped through the two models to see if they were calling &lt;code&gt;establish_connection&lt;/code&gt;, maybe we&amp;rsquo;re not instantiating the models or &lt;code&gt;Rails.env&lt;/code&gt; is wrong. &lt;strong&gt;Nope.&lt;/strong&gt; We&amp;rsquo;re running through that like normal.&lt;/li&gt;
+&lt;li&gt;I used the step debugger and query the models, rails returns both the &lt;code&gt;Phone&lt;/code&gt; and the &lt;code&gt;Phonecluster&lt;/code&gt; that were created, as I expected. &lt;code&gt;.save()&lt;/code&gt; also returned &lt;code&gt;true&lt;/code&gt;.&lt;/li&gt;
+&lt;li&gt;Last thing I tried was to look at the database while paused at a break point, aha! the records are missing!
+&lt;code&gt;language-sql
+mysql&amp;gt; SELECT count(*) FROM phones;
+&lt;/code&gt;
+&lt;code&gt;
++----------+
+| count(*) |
++----------+
+|        0 |
++----------+
+1 row in set (0.00 sec)
+&lt;/code&gt;&lt;/li&gt;
+&lt;/ol&gt;
+
+&lt;p&gt;Well, that sucks. After a lot of messing around, the issue is that somehow the database that the model is trying to connect to is the deafult in the &lt;code&gt;database.yml&lt;/code&gt;, not the one specified in &lt;code&gt;establish_connection&lt;/code&gt;. It fails silently and can&amp;rsquo;t do any fancy querying like &lt;code&gt;joins&lt;/code&gt;, but can find the models by &lt;code&gt;cid&lt;/code&gt; as they seem to be present in some weird inbetween in-memory state.&lt;/p&gt;
+
+&lt;h3 id=&#34;solution&#34;&gt;Solution&lt;/h3&gt;
+
+&lt;p&gt;Thankfully, it&amp;rsquo;s easy (though annoying) to fix this. I just added 2 lines to my setup and all of the models now show up like I&amp;rsquo;d expect.&lt;/p&gt;
+
+&lt;pre&gt;&lt;code class=&#34;language-language-ruby&#34;&gt;class SearchesControllerTest &amp;lt; ActionController::TestCase
+  def setup
+    # Re-establish connection, somehow rspec lost this
+    database_name = &amp;quot;data_#{Rails.env}&amp;quot;
+    Phone.establish_connection database_name
+    Phonecluster.establish_connection database_name
+    # End re-establish connection
+    
+    @number = &#39;1234567890&#39;
+    
+    Phone.new({
+      &#39;cid&#39; =&amp;gt; @number,
+      &#39;status&#39; =&amp;gt; &#39;INVALID&#39;
+    }).save()
+    
+    Phonecluster.new({
+      &#39;cid&#39; =&amp;gt; @number,
+      &#39;cluster_id&#39; =&amp;gt; 1
+    }).save()
+    
+  end
+end
+&lt;/code&gt;&lt;/pre&gt;
+</description>
+    </item>
+    
+  </channel>
+</rss>

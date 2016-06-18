@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1">
+<title> Logstash Config File Organization &middot; Frodux </title>
+
+
+<link rel="stylesheet" href="https://tebriel.github.io/frodux/css/slim.css">
+<link rel="stylesheet" href="https://tebriel.github.io/frodux/css/highlight.min.css">
+<link href='https://fonts.googleapis.com/css?family=Source+Sans+Pro:400,700|Source+Code+Pro' rel='stylesheet' type='text/css'>
+
+<link rel="apple-touch-icon-precomposed" sizes="144x144" href="/apple-touch-icon-144-precomposed.png">
+<link rel="shortcut icon" href="/favicon.ico">
+
+
+<link href="" rel="alternate" type="application/rss+xml" title="Frodux" />
+
+</head>
+
+<body>
+  <div class="container">
+    <div class="header">
+  <h1 class="site-title"><a href="https://tebriel.github.io/frodux/">Frodux</a></h1>
+  <p class="site-tagline"></p>
+  <div class="nav">
+    <a class="nav-btn" href="#">
+      <span class="ci ci-burger"></span>
+    </a>
+    <ul class="nav-list">
+       
+	  <li class="spacer">&ac;</li>
+
+      <li><a href="https://github.com/tebriel">Github</a></li> 
+      <li><a href="https://twitter.com/tebriel">Twitter</a></li> 
+    </ul>
+  </div>
+</div>
+    <div class="content">
+      <div class="posts">
+        <div class="post">
+          <h2 class="post-title"><a href="https://tebriel.github.io/frodux/post/logstash_config_file_organization/">Logstash Config File Organization</a></h2>
+          <span class="post-date">Mar 10, 2015 </span>
+          <div class="post-content">
+            
+
+<p>I&rsquo;m currently at <a href="http://www.elasticon.com">Elastic{ON} 15</a>, which has been an amazing experience so far. Someone had the brilliant idea to set up an Apple-Style Genius bar where you just walk up and talk to someone from <a href="http://www.elastic.co">Elastic</a> support. Sometimes you get contributors to the project your asking about too, it&rsquo;s great.</p>
+
+<p>My <a href="http://www.logstash.net">Logstash</a> config currently clocks in around 300 lines for the wide variety of things I have to parse out of syslog, I mentioned to <a href="https://twitter.com/jordansissel">Jordan Sissel</a> that the config file was almost completely unmanageable and was killing me, and he gave me the secrets I&rsquo;m about to reveal to you.</p>
+
+<h2 id="break-your-files-up">Break your files up</h2>
+
+<p>You can break up your logstash config into multiple files, and just tell logstash to match a glob for configuration. Logstash just sorts the files alphabetically and then concatenates them together.</p>
+
+<p>With the knowledge in hand that they&rsquo;ll just be sorted lexographically, I took my very long filter block in my config file and broke it up into 8 filter configs, like so: <code>0001-filter-syslog-base.conf</code>. The next one is <code>0002</code> and so on. If I ever have more than <code>9999</code> filters it&rsquo;s time to do something else. Really if I ever have more than 10, but just in case&hellip;</p>
+
+<h2 id="order-only-matters-within-blocks">Order only matters within blocks</h2>
+
+<p>For this very contrived example, let&rsquo;s say that my files get ordered in such a way that the config file has a filter then an output then a filter.</p>
+
+<ol>
+<li><code>0001-filter.conf</code></li>
+<li><code>0002-output.conf</code></li>
+<li><code>0003-filter.conf</code></li>
+</ol>
+
+<p>Doesn&rsquo;t matter! <code>0001</code> and <code>0003</code> will be ordered correctly and the output will stay outside of those two in its own output block.</p>
+
+<p>This means that as long as overall, your filters and outputs have the correct order, you can have them all in separate files each in separate blocks.</p>
+
+<p>Each file will begin with <code>filter {</code> or <code>input {</code> or <code>output {</code> so they could technically stand on their own, but will just be concatenated into one large config.</p>
+
+<h2 id="config-path-uses-dir-glob">Config Path uses Dir.glob</h2>
+
+<p>Oh this was the best revelation of all for me. Currently, when I&rsquo;m testing things, I&rsquo;ll disable syslog and elasticsearch input/output and enable stdin and stdout to test patterns. Now I can just have separate files for dev and prod input and output.</p>
+
+<p>Here&rsquo;s an example glob for launching this way:</p>
+
+<pre><code>bin/logstash agent -f 'config/logstash/conf.d/{dev,*filter*}.conf'
+</code></pre>
+
+<p>Here we&rsquo;re matching all of my filters and using the dev configuration, replace with prod and now you&rsquo;re pushing to ES.</p>
+
+<p>For reference, here&rsquo;s what my directory looks like with the config files.</p>
+
+<pre><code>cmoultrie@Sauron ~/G/logstash-1.5.0.rc2&gt; ls -l
+0001-filter-syslog-base.conf
+0002-filter-million.conf
+0003-filter-prsapi.conf
+0004-filter-use-multirequest.conf
+0005-filter-add-query_complete.conf
+0006-filter-handle-json.conf
+0007-filter-set-tag.conf
+0008-filter-identify-and-geohash.conf
+dev.conf
+prod.conf
+
+</code></pre>
+
+<h2 id="summary">Summary</h2>
+
+<p>The real magic here is that if you have a complicated set of filters or inputs, you can just separate them into different files. The ability to, without changing the config file, run in a dev environment or production is great because I always get nervous editing the settings for those things and then pushing them back to production.</p>
+
+<p>Break your files up, you&rsquo;ll be super happy.</p>
+
+          </div>
+        </div>
+        <div class="pagination">
+          <a class="btn previous " href="https://tebriel.github.io/frodux/post/logstash_grok_speeds/"> Prev</a>  
+          <a class="btn next " href="https://tebriel.github.io/frodux/post/vpn_tunnels_osx/"> Next</a> 
+        </div>
+      </div>
+    </div>
+    
+    <div class="footer">
+  
+  <p>Powered by <a href="http://gohugo.io">Hugo</a>. This theme—Slim—is open sourced on <a href="https://github.com/zhe/hugo-theme-slim">Github</a>.</p>
+  
+</div>
+
+  </div>
+  <script src="https://tebriel.github.io/frodux/js/slim.js"></script>
+  <script src="https://tebriel.github.io/frodux/js/highlight.min.js"></script>
+  <script>
+    hljs.initHighlightingOnLoad();
+  </script>
+  
+</body>
+
+</html>

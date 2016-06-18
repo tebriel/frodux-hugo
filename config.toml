@@ -1,0 +1,9 @@
+baseurl = "https://tebriel.github.io/frodux/"
+languageCode = "en-us"
+title = "Frodux"
+subtitle = "Tech stuff I come across."
+[params]
+  GithubID = "tebriel"
+  TwitterID = "tebriel"
+  Summary = true
+  Content = false

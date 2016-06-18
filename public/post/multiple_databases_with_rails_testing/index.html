@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1">
+<title> Multiple Databases with Rails Testing &middot; Frodux </title>
+
+
+<link rel="stylesheet" href="https://tebriel.github.io/frodux/css/slim.css">
+<link rel="stylesheet" href="https://tebriel.github.io/frodux/css/highlight.min.css">
+<link href='https://fonts.googleapis.com/css?family=Source+Sans+Pro:400,700|Source+Code+Pro' rel='stylesheet' type='text/css'>
+
+<link rel="apple-touch-icon-precomposed" sizes="144x144" href="/apple-touch-icon-144-precomposed.png">
+<link rel="shortcut icon" href="/favicon.ico">
+
+
+<link href="" rel="alternate" type="application/rss+xml" title="Frodux" />
+
+</head>
+
+<body>
+  <div class="container">
+    <div class="header">
+  <h1 class="site-title"><a href="https://tebriel.github.io/frodux/">Frodux</a></h1>
+  <p class="site-tagline"></p>
+  <div class="nav">
+    <a class="nav-btn" href="#">
+      <span class="ci ci-burger"></span>
+    </a>
+    <ul class="nav-list">
+       
+	  <li class="spacer">&ac;</li>
+
+      <li><a href="https://github.com/tebriel">Github</a></li> 
+      <li><a href="https://twitter.com/tebriel">Twitter</a></li> 
+    </ul>
+  </div>
+</div>
+    <div class="content">
+      <div class="posts">
+        <div class="post">
+          <h2 class="post-title"><a href="https://tebriel.github.io/frodux/post/multiple_databases_with_rails_testing/">Multiple Databases with Rails Testing</a></h2>
+          <span class="post-date">Oct 30, 2014 </span>
+          <div class="post-content">
+            
+
+<h3 id="issue">Issue</h3>
+
+<p>Unit testing a rails app with multiple databases configured per-model with <code>establish_connection</code> is unable to use advanced query features on the model objects such as <code>joins</code>.</p>
+
+<h3 id="background">Background</h3>
+
+<p>At work, we have two databases. One is for our API (a <a href="http://www.tornadoweb.org/en/stable/">Tornado</a> backend), and the other is for our UI (a <a href="http://rubyonrails.org">Rails</a> frontend). Sadly, instead of separating our concerns when these two apps were built, it was decided that they should be able to just talk directly to each database. In an ideal world we&rsquo;d have the Tornado API give us any details we want about its database, and endpoints in Rails to do the same for the API.</p>
+
+<p>In our rails models which correspond to the Tornado&rsquo;s database, we have the following:</p>
+
+<pre><code class="language-language-ruby">class Phone &lt; ActiveRecord::Base
+  establish_connection &quot;data_#{Rails.env}&quot;
+  # snip
+end
+</code></pre>
+
+<p>What this does is tell Arel that to connect to a different database for this model, appending the current working environment to the end of the database name. Not ideal, but it works (though yields a pretty crazy <code>database.yml</code>).</p>
+
+<p>Within the last two weeks, I&rsquo;ve gotten Rails Tests up and running with some basic fixtures and about 10 tests (mostly testing that we can log in and fetch a specific page). Today I started working on testing some code I was about to change, first I decided that I should test the current functionality before I broke/refactored it.</p>
+
+<p>I needed to, on-the-fly, create and query <code>Phone</code> models and correlate them with a <code>Phonecluster</code> model, so I did the following:</p>
+
+<pre><code class="language-language-ruby">require 'test_helper'
+
+class SearchesControllerTest &lt; ActionController::TestCase
+  def setup
+    @bad_phone_status = Phone.new({
+      'cid' =&gt; '1234567890',
+      'status' =&gt; 'INVALID'
+    }).save()
+  end
+  test &quot;Should create a phone&quot; do
+    assert @bad_phone_status
+  end
+end
+</code></pre>
+
+<p>Everything was hunky-dory. Looks like we&rsquo;re ready to go. Let&rsquo;s get more complicated.</p>
+
+<p><code>Phone</code> has one <code>Phonecluster</code> and their fk/pk relationship is on <code>cid</code>, so let&rsquo;s create two models, and try to join them together.</p>
+
+<pre><code class="language-language-ruby">require 'test_helper'
+
+class SearchesControllerTest &lt; ActionController::TestCase
+  def setup
+    @number = '1234567890'
+    Phone.new({
+      'cid' =&gt; @number,
+      'status' =&gt; 'INVALID'
+    }).save()
+    Phonecluster.new({
+      'cid' =&gt; @number,
+      'cluster_id' =&gt; 1
+    }).save()
+  end
+  
+  test &quot;Should create a phone[cluster] relationship&quot; do
+    assert_equal 1, Phone.joins(:phonecluster).length
+  end
+end
+</code></pre>
+
+<p><strong>Fail!</strong> If you enter into the step debugger here, and query <code>Phone.find_by_cid(@number)</code> or <code>Phonecluster.find_by_cid(@number)</code> you&rsquo;ll get back a model for each, what&rsquo;s going on here?</p>
+
+<h3 id="debugging-the-issue">Debugging The Issue</h3>
+
+<ol>
+<li>I stepped through the two models to see if they were calling <code>establish_connection</code>, maybe we&rsquo;re not instantiating the models or <code>Rails.env</code> is wrong. <strong>Nope.</strong> We&rsquo;re running through that like normal.</li>
+<li>I used the step debugger and query the models, rails returns both the <code>Phone</code> and the <code>Phonecluster</code> that were created, as I expected. <code>.save()</code> also returned <code>true</code>.</li>
+<li>Last thing I tried was to look at the database while paused at a break point, aha! the records are missing!
+<code>language-sql
+mysql&gt; SELECT count(*) FROM phones;
+</code>
+<code>
++----------+
+| count(*) |
++----------+
+|        0 |
++----------+
+1 row in set (0.00 sec)
+</code></li>
+</ol>
+
+<p>Well, that sucks. After a lot of messing around, the issue is that somehow the database that the model is trying to connect to is the deafult in the <code>database.yml</code>, not the one specified in <code>establish_connection</code>. It fails silently and can&rsquo;t do any fancy querying like <code>joins</code>, but can find the models by <code>cid</code> as they seem to be present in some weird inbetween in-memory state.</p>
+
+<h3 id="solution">Solution</h3>
+
+<p>Thankfully, it&rsquo;s easy (though annoying) to fix this. I just added 2 lines to my setup and all of the models now show up like I&rsquo;d expect.</p>
+
+<pre><code class="language-language-ruby">class SearchesControllerTest &lt; ActionController::TestCase
+  def setup
+    # Re-establish connection, somehow rspec lost this
+    database_name = &quot;data_#{Rails.env}&quot;
+    Phone.establish_connection database_name
+    Phonecluster.establish_connection database_name
+    # End re-establish connection
+    
+    @number = '1234567890'
+    
+    Phone.new({
+      'cid' =&gt; @number,
+      'status' =&gt; 'INVALID'
+    }).save()
+    
+    Phonecluster.new({
+      'cid' =&gt; @number,
+      'cluster_id' =&gt; 1
+    }).save()
+    
+  end
+end
+</code></pre>
+
+          </div>
+        </div>
+        <div class="pagination">
+          <a class="btn previous " href="https://tebriel.github.io/frodux/post/vpn_tunnels_osx/"> Prev</a>  
+        </div>
+      </div>
+    </div>
+    
+    <div class="footer">
+  
+  <p>Powered by <a href="http://gohugo.io">Hugo</a>. This theme—Slim—is open sourced on <a href="https://github.com/zhe/hugo-theme-slim">Github</a>.</p>
+  
+</div>
+
+  </div>
+  <script src="https://tebriel.github.io/frodux/js/slim.js"></script>
+  <script src="https://tebriel.github.io/frodux/js/highlight.min.js"></script>
+  <script>
+    hljs.initHighlightingOnLoad();
+  </script>
+  
+</body>
+
+</html>
